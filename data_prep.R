@@ -82,29 +82,16 @@ names(fish_eff)[1:2]<-c('spe1', 'spe2')
 
 fish_out<-cbind(prob.table(fish_co), fish_eff)
 
-#add columns for igraph
-fish_out$sig<-ifelse(fish_out$p_gt<0.05 | fish_out$p_lt<0.05, 1, 0)
+#add columns for igraph, only positive significance taken forward
+# interested in co-occurence not exclusion
+fish_out$sig<-ifelse(fish_out$p_gt<0.05 , 1, 0)
 
 #format for igraph 
 
-ig<-graph_from_data_frame(fish_out[,12:15], directed=F)
-
-#if omitting non observed interactions then do clustering without weights
-# if omitting non sig interactions then do cluster with weights
-# if omitting non sig and negative effect interactions then do cluster with weights
-
-#ig<-graph_from_data_frame(fish_out[fish_out$obs_cooccur>0,12:15], directed=F)
-#ig<-graph_from_data_frame(fish_out[fish_out$sig==1,12:15], directed=F)
-#ig<-graph_from_data_frame(fish_out[fish_out$sig==1 & fish_out$effects>0,12:15], directed=F)
-
 # Select only edges that have significant positive cooccurence,
 # but include all ns species as unconnected nodes
-ig<-graph_from_data_frame(fish_out[fish_out$sig==1 & fish_out$effects>0,12:15], directed=F,
+ig<-graph_from_data_frame(fish_out[fish_out$sig==1 ,12:15], directed=F,
                           vertices=unique(fish_out$sp1_name))
-
-length(unique(fish_out$sp1_name)) # n all species
-# n species with at least 1 sig positive coocurrence
-length(unique(fish_out[fish_out$sig==1 & fish_out$effects>0,12:15]$spe1))
 
 #calc degree (n connections) and strength (sum edge weight 'effects') and
 # eigen centrality (connected to other connected nodes aka 'hubs')
@@ -113,22 +100,11 @@ node_metrics<-data.frame(species=V(ig)$name, degree=as.vector(degree(ig)),
            eig_cent=as.vector(eigen_centrality(ig, weights = E(ig)$effects,
                                                scale=TRUE)[[1]]))
 
-
-#calculate modularity springlass without weights
-springL_noweight <- cluster_spinglass(ig, weights = NA, spins = 100, parupdate = FALSE,
-                                           start.temp = 1, stop.temp = 0.01, cool.fact = 0.99, update.rule = "config", gamma = 1, implementation = "orig", gamma.minus = 1)
-# Spinglass with negative weights
-springL_weight <- cluster_spinglass(ig, weights = E(ig)$effects, spins = 100, parupdate = FALSE,
-                                           start.temp = 1, stop.temp = 0.01, cool.fact = 0.99, update.rule = "config",
-                                    gamma = 1, implementation = "neg", gamma.minus = 1)
-
-# Spinglass with positive-only weights
-springL_weight <- cluster_spinglass(ig, weights = E(ig)$effects, spins = 100, parupdate = FALSE,
-                                    start.temp = 1, stop.temp = 0.01, cool.fact = 0.99, update.rule = "config",
-                                    gamma = 1, implementation = "orig", gamma.minus = 1)
-
-
+# check other modularity methods
 NewmanGir_weight <-edge.betweenness.community(ig, weights = E(ig)$effects, directed=F) 
+
+modularity(cluster_walktrap(ig, weights = E(ig)$effects))
+
 
 
 la <- layout_in_circle(ig, order=order(membership(NewmanGir_weight)))
