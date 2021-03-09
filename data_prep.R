@@ -3,10 +3,13 @@
 # 2) Develop code to splot networks and extract network metrics
 
 library(dplyr)
+library(ggplot2)
 library(cooccur)
 library(igraph)
-library(adonis) 
 library(labdsv)
+library(vegan)
+library(ade4)
+library(e1071)
 #read survey data
 dat<-read.csv('C:/wallacea/Files for Mark and Maria/Data & scripts/Visual survey data/Wallacea_combined data_ALL.csv')
 dat$code_trans<-paste(dat$Code, dat$Transect, sep='_')

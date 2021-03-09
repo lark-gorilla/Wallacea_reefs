@@ -6,10 +6,9 @@
 # 5) per treatment calculate: node metrics (degree, strength, eig centrality)
 # 6) summarise per treatment network:
 # Modularity, skewness of degree and strength (Kay & Mont-Cent)
-# connectance (sum of sp degree)/(n nodes^2) (Kay, sensu Gilbert)
+# connectance (sum of sp degree)/(n nodes^2) (Kay, sensu Gilbert) 
+# AKA Network density (Mont-Cent sensu Wasserman & Faust 1994)
 # OR/AND links per sp (sum of sp degree)/(n species) (Kay)
-# OR/AND Network density is the portion of potential connections
-# in a network that are realized (Mont-Cent sensu Wasserman & Faust 1994)
 # rarefied species richness, species prevelence
 # 7) combine treatment network results, pairwise sp connections
 # Change in pairwise species co-occurrence connections (degree) (Kay)
@@ -28,9 +27,16 @@ compare_comms<-function(surv_dat=sp_abun_dat, good_sites='my_good_sites', poor_s
   
   fish_mat_all<-matrify(surv_dat[c('code_trans', 'Species', 'sumAbun')])
   fish_mat_all[fish_mat_all > 0] = 1 # convert to P/A
-  fish_mat_all<-fish_mat_all[,-which(colSums(fish_mat_all )<2)] 
   #remove rare species with 1 observation across all transects (~1% occ Kay, Tulloch)
-
+  # or sp that occur at 2 transects split between treatments
+  fish_mat_all<-fish_mat_all[,-which(colSums(fish_mat_all )<2)]
+  #poor sites
+  fish_mat_all<-fish_mat_all[,-which(colSums(fish_mat_all[row.names(fish_mat_all)%in% 
+    surv_dat[surv_dat$Loc_class==poor_sites,]$code_trans,])==1)]
+  # good sites
+  fish_mat_all<-fish_mat_all[,-which(colSums(fish_mat_all[row.names(fish_mat_all)%in% 
+    surv_dat[surv_dat$Loc_class==good_sites,]$code_trans,])==1)]
+ 
   # do PCoA
   #all_nmds <- metaMDS(fish_mat_all, distance="jaccard", binary=T,
   #                              trace=FALSE, trymax=100)
@@ -82,47 +88,64 @@ compare_comms<-function(surv_dat=sp_abun_dat, good_sites='my_good_sites', poor_s
   
   
   for(i in c(good_sites, poor_sites))
+    {
+    fish_mat<-fish_mat_all[row.names(fish_mat_all)%in% 
+      surv_dat[surv_dat$Loc_class==i,]$code_trans,] # select gd/poor sites
+    
+    fish_mat<-t(fish_mat)#transpose so columns become rows for cooccur
   
-  fish_mat<-fish_mat_all[row.names(fish_mat_all)%in% 
-    surv_dat[surv_dat$Loc_class==i,]$code_trans,] # select gd/poor sites
+    
+    fish_co = cooccur(mat=fish_mat, 
+                      type="spp_site", 
+                      thresh=TRUE, 
+                      spp_names=TRUE, 
+                      prob="comb")
+    
+    fish_eff<-effect.sizes(fish_co, standardized = TRUE, matrix = FALSE)
+    names(fish_eff)[1:2]<-c('spe1', 'spe2')
+    
+    fish_out<-cbind(prob.table(fish_co), fish_eff)
+    
+    #add columns for igraph, only positive significance taken forward
+    # interested in co-occurence not exclusion
+    fish_out$sig<-ifelse(fish_out$p_gt<0.05 , 1, 0)
+    fish_out$spe1<-as.character(fish_out$spe1) # has to be char for ig vertices
+    fish_out$spe2<-as.character(fish_out$spe2)
+    #format for igraph 
+    
+    # Select only edges that have significant positive cooccurence,
+    # but include all ns species as unconnected nodes (from threat level community)
+    ig<-graph_from_data_frame(fish_out[fish_out$sig==1 ,12:15], directed=F,
+                              vertices=unique(c(fish_out$spe1, fish_out$spe2)))
   
-  fish_mat<-t(fish_mat)#transpose so columns become rows for cooccur
-
-  
-  fish_co = cooccur(mat=fish_mat, 
-                    type="spp_site", 
-                    thresh=TRUE, 
-                    spp_names=TRUE, 
-                    prob="comb")
-  
-  fish_eff<-effect.sizes(fish_co, standardized = TRUE, matrix = FALSE)
-  names(fish_eff)[1:2]<-c('spe1', 'spe2')
-  
-  fish_out<-cbind(prob.table(fish_co), fish_eff)
-  
-  #add columns for igraph, only positive significance taken forward
-  # interested in co-occurence not exclusion
-  fish_out$sig<-ifelse(fish_out$p_gt<0.05 , 1, 0)
-  
-  #format for igraph 
-  
-  # Select only edges that have significant positive cooccurence,
-  # but include all ns species as unconnected nodes (from threat level community)
-  ig<-graph_from_data_frame(fish_out[fish_out$sig==1 ,12:15], directed=F,
-                            vertices=rownames(fish_mat))
-
-  #calc Node metrics degree (n connections) and strength (sum edge weight 'effects') and
-  # eigen centrality (connected to other connected nodes aka 'hubs')
-  node_metrics<-data.frame(species=V(ig)$name, degree=as.vector(degree(ig)), 
-                           strength=as.vector(strength(ig, weights = E(ig)$effects)),
-                           eig_cent=as.vector(eigen_centrality(ig, weights = E(ig)$effects,
-                                                               scale=TRUE)[[1]]))
-  
-  # calc Network metrics
-  mod_newm<-modularity(edge.betweenness.community(ig, weights = E(ig)$effects, directed=F)) 
-  mod_clwk<-modularity(cluster_walktrap(ig, weights = E(ig)$effects))
-  skewness(degree) skewness(strength)
-  # connectance (sum of sp degree)/(n nodes^2) (Kay, sensu Gilbert)
-  # OR/AND links per sp (sum of sp degree)/(n species) (Kay)
-  # OR/AND Network density is the portion of potential connections
-  # in a network that are realized (Mont-Cent sensu Wasserman & Faust 1994)
+    #calc Node metrics degree (n connections) and strength (sum edge weight 'effects') and
+    # eigen centrality (connected to other connected nodes aka 'hubs')
+    node_metrics<-data.frame(run=i,species=V(ig)$name, degree=as.vector(degree(ig)), 
+                             strength=as.vector(strength(ig, weights = E(ig)$effects)),
+                             eig_cent=as.vector(eigen_centrality(ig, weights = E(ig)$effects,scale=TRUE)[[1]]))
+    # add occupancy                                                             
+    node_metrics<-data.frame(node_metrics, occupancy=unlist(by(node_metrics, node_metrics['species'],
+                        function(x){sum(fish_mat[paste(x$species),])/ncol(fish_mat)}, simplify=F)))
+    
+    # calc Network metrics
+    mod_newm<-modularity(edge.betweenness.community(ig, weights = E(ig)$effects, directed=F)) 
+    mod_clwk<-modularity(cluster_walktrap(ig, weights = E(ig)$effects))
+    network_metrics<-data.frame(run=i,modu_newm=mod_newm, modu_clwk=mod_clwk,
+    degree_skew=skewness(node_metrics$degree), 
+    strength_skew=skewness(node_metrics$strength),
+    sum_degree=sum(node_metrics$degree),
+    connectance=sum(node_metrics$degree)/(nrow(node_metrics)^2),
+    links_per_sp=sum(node_metrics$degree)/(nrow(node_metrics)))
+    
+    # network plot data
+    f1<-data.frame(run=i, fish_out[fish_out$sig==1 ,12:15])
+    
+    #bind together for i loop
+    if(i==good_sites){
+    nwplot<-f1
+    node_met_out<-node_metrics
+    netw_met_out<-network_metrics}
+    else{nwplot<-rbind(nwplot, f1)
+    node_met_out<-rbind(node_metrics, node_met_out)
+    netw_met_out<-rbind(network_metrics, netw_met_out)}
+    }
