@@ -1,7 +1,7 @@
-# Data preparation and exploration 
-# 1) cluster Sites within Locations based on threat/habitat into good/degraded
-# 2) Develop code to splot networks and extract network metrics
+# 1) Exploration of data to see how current benthic habitat clustering groups transects
+# 2) Demonstration of R function to perform analyses similar to Kay et al(2018)
 
+# load libraries
 library(dplyr)
 library(ggplot2)
 library(cooccur)
@@ -10,6 +10,8 @@ library(labdsv)
 library(vegan)
 library(ade4)
 library(e1071)
+
+####~~~~ Explore data ~~~~####
 #read survey data
 dat<-read.csv('C:/wallacea/Files for Mark and Maria/Data & scripts/Visual survey data/Wallacea_combined data_ALL.csv')
 dat$code_trans<-paste(dat$Code, dat$Transect, sep='_')
@@ -31,15 +33,16 @@ dat%>%group_by(Cluster, Location, Site)%>%summarise(n())
 # They actually span transects within sites!
 dat%>%group_by(Code)%>%summarise(n_clust=length(unique(Cluster)))
 
-# OK so for a trial lets:
+# The plan:
 # Run on Pres-Abs data
 # run per species not FG
 # run per transect
-# run per taxa at the moment - run bipartite for inter-taxa networks?
+# run per taxa at the moment - could run bipartite for inter-taxa networks?
 # outputting network metrics per taxa will allow us to test effect of Location/Site/habitat (Cluster) and Impacts/Env
 # try seperate sites into good/degraded habitat per Location, then compare networks
 # Figure out functional implications post-network creation e.g. what FG are hub species
-# use Maarten's cluster code as template
+
+####~~~~ * ~~~~~#####
 
 ####~~~~ Cluster sites into good/degraded habitat per site ~~~~####
 # focus on CPCe data
@@ -48,7 +51,13 @@ dat%>%group_by(Code)%>%summarise(n_clust=length(unique(Cluster)))
 
 ####~~~~ * ~~~~~#####
 
-# assign clusters to species data
+####~~~~ Demonstration of R function to perform Kay et al(2018) analyses ~~~~####
+
+# assign good/poor categories to individual sites
+# exmaple below is just random e.g. Spermonde sites 1-6
+# are assigned good and sites 7-12 poor. Also you would want to 
+# assign individual transects to good/poor categories rather than 
+# all transects within a site
 
 dat$Loc_class<-'Lucipara_pristine'
 dat[dat$Code %in% paste0('SPE', c(1,2,3,4,5,6)),]$Loc_class<-'Spermonde_good'
@@ -61,117 +70,85 @@ dat[dat$Code %in% paste0('HAL', c(7,8,9,10,11,12)),]$Loc_class<-'Halmahera_poor'
 # Run fish data first
 
 fish<-dat[dat$Kingdom=='Fish',]
-#sum invidual observations
-fish_sum<-fish%>%group_by(Loc_class, code_trans, Species)%>%summarise(sumAbun=sum(Count))%>%as.data.frame()
-# summarise fish per Location
-fish_loc_sum<-fish%>%group_by(Location, Species)%>%summarise(sumAbun=sum(Count))%>%as.data.frame()
 
+#sum invidual species observations at transect level
+fish_sum<-fish%>%group_by(Location, Loc_class, code_trans, Species)%>%summarise(sumAbun=sum(Count))%>%as.data.frame()
+# source function
+source('C:/wallacea/Wallacea_reefs/main_analyses_function.R')
+# run function per region
+# function requires data (surv_dat) be formatted identically to fish_sum.
+# Column1: 'Location'= name of region/location
+# Column2: 'Loc_class'= good/poor category assigned to transect
+# Column3: 'code_trans'= transect name
+# Column3: 'Species'= species name
+# Column3: 'sumAbun'= species abundance per transect
 
-#make networks per treatment per site 
+ambon_compare<-compare_comms(surv_dat=filter(fish_sum, Location=='Ambon'),
+                             good_sites='Ambon_good', poor_sites='Ambon_poor') # run function!
+# can ignore warnings
+# returns a list of outputs
+ambon_compare[[1]] # plot data for igraph network plot
+ambon_compare[[2]] # node metrics
+ambon_compare[[3]] # network metrics
+ambon_compare[[4]] # species accumulation curve plot
+ambon_compare[[5]] # Multivariate PCoA plot
 
-fish_mat<-matrify(fish_sum[fish_sum$Loc_class == 'Halmahera_good', 2:4])
-fish_mat<-t(fish_mat)#transpose so columns become rows for cooccur
-fish_mat<-fish_mat[-which(rowSums(fish_mat)<2),] #remove rare species with 1 observation across all transects
-fish_mat[fish_mat > 0] = 1 # convert to P/A
-
-fish_co = cooccur(mat=fish_mat, 
-                  type="spp_site", 
-                  thresh=TRUE, 
-                  spp_names=TRUE, 
-                  prob="comb")
-
-fish_eff<-effect.sizes(fish_co, standardized = TRUE, matrix = FALSE)
-names(fish_eff)[1:2]<-c('spe1', 'spe2')
-
-fish_out<-cbind(prob.table(fish_co), fish_eff)
-
-#add columns for igraph, only positive significance taken forward
-# interested in co-occurence not exclusion
-fish_out$sig<-ifelse(fish_out$p_gt<0.05 , 1, 0)
-
-#format for igraph 
-
-# Select only edges that have significant positive cooccurence,
-# but include all ns species as unconnected nodes
-ig<-graph_from_data_frame(fish_out[fish_out$sig==1 ,12:15], directed=F,
-                          vertices=unique(fish_out$sp1_name))
-
-#calc degree (n connections) and strength (sum edge weight 'effects') and
-# eigen centrality (connected to other connected nodes aka 'hubs')
-node_metrics<-data.frame(species=V(ig)$name, degree=as.vector(degree(ig)), 
-           strength=as.vector(strength(ig, weights = E(ig)$effects)),
-           eig_cent=as.vector(eigen_centrality(ig, weights = E(ig)$effects,
-                                               scale=TRUE)[[1]]))
-
-# check other modularity methods
-NewmanGir_weight <-edge.betweenness.community(ig, weights = E(ig)$effects, directed=F) 
-
-modularity(cluster_walktrap(ig, weights = E(ig)$effects))
-
-
-
-la <- layout_in_circle(ig, order=order(membership(NewmanGir_weight)))
-
-par(mar=c(8,6,6,6))
-
-
-plot(ig, layout=la, edge.width=abs(E(ig)$effects),
-     edge.color=adjustcolor(ifelse(E(ig)$effects<0, 'grey', 'black'),0.5), vertex.size=2,
-     vertex.label="", edge.curved=0.2)
-
-## Apply labels manually
-#Specify x and y coordinates of labels, adjust outward as desired
-x = la[,1]*1.3
-y = la[,2]*1.3
-
-#create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
-angle = ifelse(atan(-(la[,1]/la[,2]))*(180/pi) < 0,  90 + atan(-(la[,1]/la[,2]))*(180/pi), 270 + atan(-la[,1]/la[,2])*(180/pi))
-
-
-pal1<-sample(c("#564138","#2e86ab","#f6f5ae","#f5f749","#f24236","#f18805","#f7996e","#285238","#138a36","#5f00ba",
-  "#b0d0d3","#c08497","#f7af9d","#f7e3af","#f3eec3","#393e41","#d6ff79","#5f00ba","#3f3244","#2f2235",
-  "#ddd78d","#dcbf85","#8b635c","#60594d","#93a29b","#050517","#197bbd","#125e8a","#204b57","#610f7f",
-  "#3a405a","#aec5eb","#f9dec9","#e9afa3","#685044","#40c9a2","#e55381","#a31621","#db222a","#767522",
-  "#628395","#96897b","#dbad6a","#cf995f","#d0ce7c","#f5efff","#48e5c2","#f991cc","#092327","#a8201a"),
-  39)
-
-
-pal2<-sample(rainbow(39), 39)
-#Apply the text labels with a loop with angle as srt
-for (i in 1:length(x)) {
-  text(x=x[i], y=y[i], labels=attr(membership(NewmanGir_weight)[i],'names'),
-  adj=NULL, pos=NULL, cex=.7, col=pal1[membership(NewmanGir_weight)[i]], srt=angle[i], xpd=T)
+# Make igraph plots for both threat treatments with little function
+plot_network<-function(regional_compare_output=ambon_compare[[1]],site_type='Ambon_good')
+{
+ig_ready<-graph_from_data_frame(regional_compare_output[regional_compare_output$run==site_type,c(2:4)], directed=F,
+                                 vertices=unique(c(regional_compare_output$spe1,regional_compare_output$spe2)))
+  
+  la <- layout_in_circle(ig_ready)
+  par(mar=c(8,6,6,6))
+  plot(ig_ready, layout=la, edge.width=abs(E(ig_ready)$effects),
+       edge.color='black', vertex.size=2,
+       vertex.label="", edge.curved=0.2)
+  
+  ## Apply labels manually
+  #Specify x and y coordinates of labels, adjust outward as desired
+  x = la[,1]*1.3
+  y = la[,2]*1.3
+  vat<-vertex.attributes(ig_ready)$`name`
+  threat_lev_sp<-unique(c(regional_compare_output[regional_compare_output$run==site_type,]$spe1,
+                          regional_compare_output[regional_compare_output$run==site_type,]$spe2))
+  
+  #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+  angle = ifelse(atan(-(la[,1]/la[,2]))*(180/pi) < 0,  90 + atan(-(la[,1]/la[,2]))*(180/pi), 270 + atan(-la[,1]/la[,2])*(180/pi))
+  
+  #Apply the text labels with a loop with angle as srt
+  for (i in 1:length(x)) {
+    text(x=x[i], y=y[i], labels=vat[i],
+         adj=NULL, pos=NULL, cex=.7, col=ifelse(vat[i]%in%threat_lev_sp, 'black', 'grey'), srt=angle[i], xpd=T)}
 }
 
+#make Ambon plots with plot_network function
+plot_network(regional_compare_output=ambon_compare[[1]],site_type='Ambon_good')
+plot_network(regional_compare_output=ambon_compare[[1]],site_type='Ambon_poor')
 
-#Apply the text labels with a loop with angle as srt
-for (i in 1:length(x)) {
-  text(x=x[i], y=y[i], labels=V(ig)[order(membership(NewmanGir_weight))]$name[i], adj=NULL, pos=NULL, cex=.7, col="black", srt=angle[i], xpd=T)
-}
+# run for Halmahera
+halmahera_compare<-compare_comms(surv_dat=filter(fish_sum, Location=='Halmahera'),
+                             good_sites='Halmahera_good', poor_sites='Halmahera_poor')
+halmahera_compare[[3]]
+halmahera_compare[[4]]
+halmahera_compare[[5]]
+plot_network(regional_compare_output=halmahera_compare[[1]],site_type='Halmahera_good')
+plot_network(regional_compare_output=halmahera_compare[[1]],site_type='Halmahera_poor')
 
-#https://gist.github.com/ajhmohr/5337a5c99b504e4a243fad96203fa74f
+# run for Spermonde
+spermonde_compare<-compare_comms(surv_dat=filter(fish_sum, Location=='Spermonde'),
+                                 good_sites='Spermonde_good', poor_sites='Spermonde_poor')
+spermonde_compare[[3]]
+spermonde_compare[[4]]
+spermonde_compare[[5]]
+plot_network(regional_compare_output=spermonde_compare[[1]],site_type='Spermonde_good')
+plot_network(regional_compare_output=spermonde_compare[[1]],site_type='Spermonde_poor')
 
-
-# igraph plotting
-
-ig1<-graph_from_data_frame(fish_out[,12:15], directed=F,
-                           vertices=filter(fish_loc_sum, Location=='Halmahera')%>%select(Species))
-
-
-ig2<-delete_edges(ig1, which(E(ig1)$sig ==0))
-
-la <- layout_in_circle(ig2)
-
-plot(ig2, layout=la, edge.width=abs(E(ig2)$effects),
-     edge.color=ifelse(E(ig2)$effects>0, 'dark green', 'dark red'), vertex.size=1.5,
-     vertex.label="")
-
+### OLD  stuff ###
 
 #heatmap of positive significant interactions only
 heatmap(get.adjacency(graph_from_data_frame(fish_out[fish_out$sig>0 &
                                                        fish_out$effects>0,12:15], directed=F), attr="effects", sparse=F))
-
-### OLD ###
 
 
 fish<-dat[dat$Kingdom=='Fish',]

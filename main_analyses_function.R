@@ -17,11 +17,10 @@
 # Links gained (because species gain in modified landscape)
 # Links lost (species present across both landscapes)
 # Links gained (species present across both landscapes)
-# 8) PLot change in sp prevelence against change in sp degree (Kay)
+# 8) Plot change in sp prevelence against change in sp degree (Kay)
 # colour by quad-sector AND by funtional group (+ kernel)
 
-compare_comms<-function(surv_dat=sp_abun_dat, good_sites='my_good_sites', poor_sites='my_poor_sites',
-                         run_spaccu=TRUE, run_multiv=TRUE, run_netwrk=TRUE)
+compare_comms<-function(surv_dat=sp_abun_dat, good_sites='my_good_sites', poor_sites='my_poor_sites')
 {  
   # Setup Location level sp occurrence matrix
   
@@ -148,4 +147,7 @@ compare_comms<-function(surv_dat=sp_abun_dat, good_sites='my_good_sites', poor_s
     else{nwplot<-rbind(nwplot, f1)
     node_met_out<-rbind(node_metrics, node_met_out)
     netw_met_out<-rbind(network_metrics, netw_met_out)}
-    }
+  }
+  
+return(list(nwplot, node_met_out, netw_met_out, spacc_plot, pco_plot)) 
+}
